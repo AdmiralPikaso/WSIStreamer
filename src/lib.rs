@@ -53,6 +53,7 @@
 //! }
 //! ```
 
+pub mod annotation;
 pub mod config;
 pub mod error;
 pub mod format;
@@ -62,6 +63,11 @@ pub mod slide;
 pub mod tile;
 
 // Re-export commonly used types
+pub use annotation::{
+    Annotation, AnnotationError, AnnotationFormat, AnnotationQuery, AnnotationStore,
+    AnnotationStyle, AnnotationType, BatchAnnotationRequest, BatchAnnotationResponse, BoundingBox,
+    CreateAnnotationRequest, Geometry, Point, UpdateAnnotationRequest,
+};
 pub use config::{CheckConfig, Cli, Command, Config, ServeConfig, SignConfig, SignOutputFormat};
 pub use error::{FormatError, IoError, TiffError, TileError};
 pub use format::tiff::{

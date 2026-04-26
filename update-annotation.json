@@ -1,0 +1,15 @@
+{
+  "geometry": {
+    "kind": "point",
+    "point": {
+      "x": 1234,
+      "y": 2345
+    }
+  },
+  "style": {
+    "color": "#00aa88",
+    "opacity": 0.8
+  },
+  "label": "api update test",
+  "author_id": "tester-updated"
+}

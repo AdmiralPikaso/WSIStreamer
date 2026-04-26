@@ -67,6 +67,11 @@ async fn run_serve(config: ServeConfig) -> ExitCode {
         config.cache_blocks,
         config.cache_tiles / (1024 * 1024)
     );
+    if let Some(ref annotations_file) = config.annotations_file {
+        info!("  Annotations: JSON file {}", annotations_file.display());
+    } else {
+        info!("  Annotations: in-memory");
+    }
 
     // Create S3 client
     let s3_client = create_s3_client(config.s3_endpoint.as_deref(), &config.s3_region).await;
@@ -220,6 +225,10 @@ fn build_router_config(config: &ServeConfig) -> RouterConfig {
     // Apply CORS origins
     if let Some(ref origins) = config.cors_origins {
         router_config = router_config.with_cors_origins(origins.clone());
+    }
+
+    if let Some(ref annotations_file) = config.annotations_file {
+        router_config = router_config.with_annotation_store_path(annotations_file.clone());
     }
 
     // Apply tracing setting

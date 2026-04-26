@@ -1,0 +1,15 @@
+{
+  "geometry": {
+    "kind": "rectangle",
+    "x": 1000,
+    "y": 2000,
+    "width": 500,
+    "height": 300
+  },
+  "style": {
+    "color": "#ff3366",
+    "opacity": 0.6
+  },
+  "label": "test annotation",
+  "author_id": "tester"
+}
