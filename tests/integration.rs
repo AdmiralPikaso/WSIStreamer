@@ -12,6 +12,7 @@
 mod integration {
     pub mod test_utils;
 
+    pub mod annotation_tests;
     pub mod api_tests;
     pub mod auth_tests;
     pub mod cache_tests;

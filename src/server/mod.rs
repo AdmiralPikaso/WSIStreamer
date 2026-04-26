@@ -16,12 +16,19 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 
+pub mod annotation_handlers;
 pub mod auth;
 pub mod dzi;
 pub mod handlers;
 pub mod routes;
 pub mod viewer;
 
+pub use annotation_handlers::{
+    batch_annotations_handler, create_annotation_handler, delete_annotation_handler,
+    delete_slide_annotation_handler, export_annotations_handler, get_annotation_handler,
+    import_annotations_handler, list_annotations_handler, update_annotation_handler,
+    update_slide_annotation_handler,
+};
 pub use auth::{auth_middleware, AuthError, AuthQueryParams, OptionalAuth, SignedUrlAuth};
 pub use handlers::{
     dzi_descriptor_handler, health_handler, slide_metadata_handler, slides_handler,

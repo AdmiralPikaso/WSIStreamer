@@ -35,17 +35,28 @@
 
 use std::time::Duration;
 
-use axum::{middleware, routing::get, Router};
+use axum::{
+    middleware,
+    routing::{get, post, put},
+    Router,
+};
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use http::Method;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
+use super::annotation_handlers::{
+    batch_annotations_handler, create_annotation_handler, delete_annotation_handler,
+    delete_slide_annotation_handler, export_annotations_handler, get_annotation_handler,
+    import_annotations_handler, list_annotations_handler, update_annotation_handler,
+    update_slide_annotation_handler,
+};
 use super::auth::SignedUrlAuth;
 use super::handlers::{
     dzi_descriptor_handler, health_handler, slide_metadata_handler, slides_handler,
     thumbnail_handler, tile_handler, viewer_handler, AppState,
 };
+use crate::annotation::AnnotationStore;
 use crate::slide::SlideSource;
 use crate::tile::TileService;
 
@@ -70,6 +81,9 @@ pub struct RouterConfig {
 
     /// Whether to enable request tracing
     pub enable_tracing: bool,
+
+    /// Optional JSON file used for persistent annotation storage.
+    pub annotation_store_path: Option<std::path::PathBuf>,
 }
 
 impl RouterConfig {
@@ -87,6 +101,7 @@ impl RouterConfig {
             cors_origins: None, // Allow any origin by default
             cache_max_age: 3600,
             enable_tracing: true,
+            annotation_store_path: None,
         }
     }
 
@@ -100,6 +115,7 @@ impl RouterConfig {
             cors_origins: None,
             cache_max_age: 3600,
             enable_tracing: true,
+            annotation_store_path: None,
         }
     }
 
@@ -135,6 +151,12 @@ impl RouterConfig {
         self.enable_tracing = enabled;
         self
     }
+
+    /// Store annotations in a JSON file on disk.
+    pub fn with_annotation_store_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.annotation_store_path = Some(path.into());
+        self
+    }
 }
 
 // =============================================================================
@@ -162,11 +184,20 @@ where
     S: SlideSource + 'static,
 {
     // Create application state with auth info for viewer token generation
+    let annotation_store = config
+        .annotation_store_path
+        .clone()
+        .map(AnnotationStore::json_file)
+        .unwrap_or_else(AnnotationStore::in_memory);
+
     let app_state = if config.auth_enabled {
         let auth = SignedUrlAuth::new(&config.auth_secret);
-        AppState::with_cache_max_age(tile_service, config.cache_max_age).with_auth(auth.clone())
+        AppState::with_cache_max_age(tile_service, config.cache_max_age)
+            .with_annotation_store(annotation_store)
+            .with_auth(auth.clone())
     } else {
         AppState::with_cache_max_age(tile_service, config.cache_max_age)
+            .with_annotation_store(annotation_store)
     };
 
     // Create the auth layer if enabled
@@ -208,12 +239,39 @@ where
         .route("/{slide_id}", get(slide_metadata_handler::<S>))
         .route("/{slide_id}/dzi", get(dzi_descriptor_handler::<S>))
         .route("/{slide_id}/thumbnail", get(thumbnail_handler::<S>))
+        .route(
+            "/{slide_id}/annotations",
+            get(list_annotations_handler::<S>).post(create_annotation_handler::<S>),
+        )
+        .route(
+            "/{slide_id}/annotations/export",
+            get(export_annotations_handler::<S>),
+        )
+        .route(
+            "/{slide_id}/annotations/import",
+            post(import_annotations_handler::<S>),
+        )
+        .route(
+            "/{slide_id}/annotations/{annotation_id}",
+            put(update_slide_annotation_handler::<S>).delete(delete_slide_annotation_handler::<S>),
+        )
+        .with_state(app_state.clone());
+
+    let annotation_routes = Router::new()
+        .route("/batch", post(batch_annotations_handler::<S>))
+        .route(
+            "/{annotation_id}",
+            get(get_annotation_handler::<S>)
+                .put(update_annotation_handler::<S>)
+                .delete(delete_annotation_handler::<S>),
+        )
         .with_state(app_state.clone());
 
     // Create nested routes with auth applied AFTER nesting
     let protected_routes = Router::new()
         .nest("/tiles", tile_routes)
         .nest("/slides", slides_routes)
+        .nest("/annotations", annotation_routes)
         .layer(middleware::from_fn_with_state(
             auth,
             super::auth::auth_middleware,
@@ -250,6 +308,29 @@ where
         .route("/slides/{slide_id}", get(slide_metadata_handler::<S>))
         .route("/slides/{slide_id}/dzi", get(dzi_descriptor_handler::<S>))
         .route("/slides/{slide_id}/thumbnail", get(thumbnail_handler::<S>))
+        .route(
+            "/slides/{slide_id}/annotations",
+            get(list_annotations_handler::<S>).post(create_annotation_handler::<S>),
+        )
+        .route(
+            "/slides/{slide_id}/annotations/export",
+            get(export_annotations_handler::<S>),
+        )
+        .route(
+            "/slides/{slide_id}/annotations/import",
+            post(import_annotations_handler::<S>),
+        )
+        .route(
+            "/slides/{slide_id}/annotations/{annotation_id}",
+            put(update_slide_annotation_handler::<S>).delete(delete_slide_annotation_handler::<S>),
+        )
+        .route("/annotations/batch", post(batch_annotations_handler::<S>))
+        .route(
+            "/annotations/{annotation_id}",
+            get(get_annotation_handler::<S>)
+                .put(update_annotation_handler::<S>)
+                .delete(delete_annotation_handler::<S>),
+        )
         .route("/view/{slide_id}", get(viewer_handler::<S>))
         .with_state(app_state)
         .layer(cors)
@@ -258,7 +339,14 @@ where
 /// Build the CORS layer based on configuration.
 fn build_cors_layer(config: &RouterConfig) -> CorsLayer {
     let cors = CorsLayer::new()
-        .allow_methods([Method::GET, Method::HEAD, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::HEAD,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers([AUTHORIZATION, CONTENT_TYPE])
         .max_age(Duration::from_secs(86400)); // 24 hours
 

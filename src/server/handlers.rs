@@ -19,6 +19,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, warn};
 
+use crate::annotation::AnnotationStore;
 use crate::error::{FormatError, IoError, TiffError, TileError};
 use crate::slide::SlideSource;
 use crate::tile::{TileRequest, TileService, DEFAULT_JPEG_QUALITY};
@@ -41,6 +42,9 @@ pub struct AppState<S: SlideSource> {
 
     /// Authentication configuration for generating signed URLs in the viewer
     pub auth: Option<SignedUrlAuth>,
+
+    /// Shared annotation store.
+    pub annotation_store: AnnotationStore,
 }
 
 impl<S: SlideSource> AppState<S> {
@@ -50,6 +54,7 @@ impl<S: SlideSource> AppState<S> {
             tile_service: Arc::new(tile_service),
             cache_max_age: 3600, // 1 hour default
             auth: None,
+            annotation_store: AnnotationStore::in_memory(),
         }
     }
 
@@ -59,12 +64,19 @@ impl<S: SlideSource> AppState<S> {
             tile_service: Arc::new(tile_service),
             cache_max_age,
             auth: None,
+            annotation_store: AnnotationStore::in_memory(),
         }
     }
 
     /// Set authentication for the viewer to generate signed tile URLs.
     pub fn with_auth(mut self, auth: SignedUrlAuth) -> Self {
         self.auth = Some(auth);
+        self
+    }
+
+    /// Set the shared annotation store.
+    pub fn with_annotation_store(mut self, annotation_store: AnnotationStore) -> Self {
+        self.annotation_store = annotation_store;
         self
     }
 }
@@ -75,6 +87,7 @@ impl<S: SlideSource> Clone for AppState<S> {
             tile_service: Arc::clone(&self.tile_service),
             cache_max_age: self.cache_max_age,
             auth: self.auth.clone(),
+            annotation_store: self.annotation_store.clone(),
         }
     }
 }

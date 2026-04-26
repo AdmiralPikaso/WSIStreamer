@@ -218,6 +218,10 @@ pub struct ServeConfig {
     #[arg(long, default_value_t = DEFAULT_CACHE_MAX_AGE, env = "WSI_CACHE_MAX_AGE")]
     pub cache_max_age: u32,
 
+    /// JSON file used to persist annotations. If omitted, annotations are kept in memory.
+    #[arg(long, env = "WSI_ANNOTATIONS_FILE")]
+    pub annotations_file: Option<std::path::PathBuf>,
+
     // =========================================================================
     // CORS Configuration
     // =========================================================================
@@ -534,6 +538,7 @@ mod tests {
             block_size: DEFAULT_BLOCK_SIZE,
             jpeg_quality: 85,
             cache_max_age: 7200,
+            annotations_file: None,
             cors_origins: None,
             verbose: false,
             no_tracing: false,
