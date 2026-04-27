@@ -34,6 +34,6 @@ pub use handlers::{
     dzi_descriptor_handler, health_handler, slide_metadata_handler, slides_handler,
     thumbnail_handler, tile_handler, viewer_handler, AppState, ErrorResponse, HealthResponse,
     LevelMetadataResponse, SlideMetadataResponse, SlidesQueryParams, SlidesResponse,
-    ThumbnailQueryParams, TilePathParams, TileQueryParams,
+    ThumbnailQueryParams, TilePathParams, TileQueryParams, ViewerQueryParams,
 };
 pub use routes::{create_dev_router, create_production_router, create_router, RouterConfig};

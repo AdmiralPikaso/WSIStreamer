@@ -199,6 +199,14 @@ fn default_thumbnail_size() -> u32 {
     512
 }
 
+/// Query parameters for viewer requests.
+#[derive(Debug, Deserialize)]
+pub struct ViewerQueryParams {
+    /// Optional author id used for annotations created from the viewer.
+    #[serde(default)]
+    pub author_id: Option<String>,
+}
+
 // =============================================================================
 // Response Types
 // =============================================================================
@@ -890,6 +898,7 @@ pub async fn slide_metadata_handler<S: SlideSource>(
 pub async fn viewer_handler<S: SlideSource>(
     State(state): State<AppState<S>>,
     Path(slide_id): Path<String>,
+    Query(query): Query<ViewerQueryParams>,
     headers: HeaderMap,
 ) -> Result<Html<String>, SlideMetadataError> {
     // Get slide from registry to retrieve metadata
@@ -953,10 +962,37 @@ pub async fn viewer_handler<S: SlideSource>(
         })
         .unwrap_or_default();
 
+    let author_id = viewer_author_id(&query, &headers);
+
     // Generate the viewer HTML with auth info
-    let html = super::viewer::generate_viewer_html(&slide_id, &metadata, &base_url, &auth_query);
+    let html = super::viewer::generate_viewer_html(
+        &slide_id,
+        &metadata,
+        &base_url,
+        &auth_query,
+        &author_id,
+    );
 
     Ok(Html(html))
+}
+
+fn viewer_author_id(query: &ViewerQueryParams, headers: &HeaderMap) -> String {
+    if let Some(author_id) = query.author_id.as_deref().map(str::trim) {
+        if !author_id.is_empty() {
+            return author_id.to_string();
+        }
+    }
+
+    for header_name in ["x-forwarded-user", "x-remote-user", "x-auth-request-user"] {
+        if let Some(value) = headers.get(header_name).and_then(|h| h.to_str().ok()) {
+            let value = value.trim();
+            if !value.is_empty() {
+                return value.to_string();
+            }
+        }
+    }
+
+    "viewer".to_string()
 }
 
 /// Handle DZI descriptor requests - returns XML descriptor for Deep Zoom viewers.

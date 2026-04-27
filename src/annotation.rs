@@ -189,6 +189,8 @@ impl Geometry {
 pub struct AnnotationStyle {
     pub color: String,
     pub opacity: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub point_radius: Option<f64>,
 }
 
 impl Default for AnnotationStyle {
@@ -196,6 +198,7 @@ impl Default for AnnotationStyle {
         Self {
             color: "#ff3366".to_string(),
             opacity: 0.55,
+            point_radius: None,
         }
     }
 }
@@ -738,6 +741,9 @@ fn validate_style(style: &AnnotationStyle) -> Result<(), AnnotationError> {
             "color must be a #RRGGBB or #RRGGBBAA hex value".to_string(),
         ));
     }
+    if let Some(point_radius) = style.point_radius {
+        validate_positive("point_radius", point_radius)?;
+    }
     Ok(())
 }
 
@@ -888,6 +894,7 @@ fn import_geojson(
                     .get("opacity")
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.55) as f32,
+                point_radius: properties.get("point_radius").and_then(|v| v.as_f64()),
             };
             Ok(CreateAnnotationRequest {
                 id: feature
