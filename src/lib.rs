@@ -87,7 +87,7 @@ pub use server::{
     slide_metadata_handler, slides_handler, tile_handler, AppState, AuthError, AuthQueryParams,
     ErrorResponse, HealthResponse, LevelMetadataResponse, OptionalAuth, RouterConfig,
     SignedUrlAuth, SlideMetadataResponse, SlidesQueryParams, SlidesResponse, TilePathParams,
-    TileQueryParams,
+    TileQueryParams, ViewerQueryParams,
 };
 pub use slide::{
     CachedSlide, LevelInfo, S3SlideSource, SlideListResult, SlideReader, SlideRegistry, SlideSource,

@@ -26,11 +26,13 @@ fn html_escape(s: &str) -> String {
 /// * `metadata` - Slide metadata containing dimensions and level info
 /// * `base_url` - Base URL for tile requests (e.g., "http://localhost:3000")
 /// * `auth_query` - Optional query string for authentication (e.g., "&exp=...&sig=...")
+/// * `author_id` - Default annotation author id for the viewer.
 pub fn generate_viewer_html(
     slide_id: &str,
     metadata: &SlideMetadataResponse,
     base_url: &str,
     auth_query: &str,
+    author_id: &str,
 ) -> String {
     let base_url = base_url.trim_end_matches('/');
     let encoded_slide_id = urlencoding::encode(slide_id);
@@ -60,7 +62,7 @@ pub fn generate_viewer_html(
     let escaped_format = html_escape(&metadata.format);
     let annotation_styles = annotation_styles();
     let annotation_panel = annotation_panel();
-    let annotation_script = annotation_script(base_url, &encoded_slide_id, auth_query);
+    let annotation_script = annotation_script(base_url, &encoded_slide_id, auth_query, author_id);
 
     format!(
         r##"<!DOCTYPE html>
@@ -410,10 +412,28 @@ fn annotation_styles() -> &'static str {
         }
         .annotation-panel select,
         .annotation-panel .annotation-label,
+        .annotation-panel .annotation-field,
         .annotation-panel .annotation-status {
             grid-column: 1 / -1;
             width: 100%;
+        }
+        .annotation-panel .annotation-field {
+            display: grid;
+            gap: 4px;
+        }
+        .annotation-panel .annotation-field label {
+            color: rgba(255, 255, 255, 0.66);
+            font-size: 11px;
+            line-height: 12px;
+        }
+        .annotation-panel .annotation-label,
+        .annotation-panel .annotation-field input {
             padding: 0 8px;
+        }
+        .annotation-panel .annotation-field input[readonly] {
+            color: rgba(255, 255, 255, 0.72);
+            background: rgba(255, 255, 255, 0.04);
+            cursor: default;
         }
         .annotation-panel .annotation-actions {
             grid-column: 1 / -1;
@@ -484,10 +504,14 @@ fn annotation_panel() -> &'static str {
         <button type="button" id="annotation-refresh" title="Reload annotations">Sync</button>
         <input type="color" id="annotation-color" class="annotation-color" value="#ff3366" title="Color">
         <input type="range" id="annotation-opacity" class="annotation-opacity" min="0.1" max="1" step="0.05" value="0.55" title="Opacity">
-        <input type="text" id="annotation-label" class="annotation-label" maxlength="120" placeholder="Text for annotation" title="Text label">
-        <select id="annotation-author" title="Author">
-            <option value="viewer">viewer</option>
-        </select>
+        <div class="annotation-field">
+            <label for="annotation-label">Label</label>
+            <input type="text" id="annotation-label" maxlength="120" placeholder="Text for annotation" title="Text label">
+        </div>
+        <div class="annotation-field">
+            <label for="annotation-author">Author</label>
+            <input type="text" id="annotation-author" maxlength="120" placeholder="Author ID" title="Author ID" readonly>
+        </div>
         <div class="annotation-actions">
             <button type="button" id="annotation-finish" title="Finish polygon or path">Done</button>
             <button type="button" id="annotation-cancel" title="Cancel current drawing">Cancel</button>
@@ -500,11 +524,17 @@ fn annotation_panel() -> &'static str {
     "##
 }
 
-fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -> String {
+fn annotation_script(
+    base_url: &str,
+    encoded_slide_id: &str,
+    auth_query: &str,
+    author_id: &str,
+) -> String {
     let script = r#"
         const annotationApiBase = "__BASE_URL__";
         const annotationSlideId = "__SLIDE_ID__";
         const annotationAuthQuery = "__AUTH_QUERY__";
+        const annotationDefaultAuthor = "__AUTHOR_ID__";
         const annotationCanvas = document.getElementById('annotation-canvas');
         const annotationCtx = annotationCanvas.getContext('2d');
         const annotationMinimap = document.getElementById('annotation-minimap-canvas');
@@ -527,6 +557,7 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
         let editOperation = null;
         let resizeHandle = null;
         let resizeStart = null;
+        annotationAuthor.value = annotationDefaultAuthor || 'viewer';
 
         function resizeAnnotationCanvas() {
             const rect = viewer.container.getBoundingClientRect();
@@ -603,6 +634,7 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
 
         async function saveAnnotation(geometry) {
             const label = annotationLabel.value.trim();
+            const author = annotationDefaultAuthor || 'viewer';
             const response = await fetch(annotationEndpoint(`/slides/${annotationSlideId}/annotations`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -610,7 +642,7 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
                     geometry,
                     style: currentStyle(),
                     label: label || null,
-                    author_id: annotationAuthor.value || 'viewer'
+                    author_id: author
                 })
             });
             if (response.ok) {
@@ -618,6 +650,7 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
                 annotations.push(annotation);
                 selectedAnnotation = annotation;
                 annotationLabel.value = '';
+                annotationAuthor.value = annotation.author_id || author;
                 setStatus(`Saved ${geometry.kind}`);
                 renderAnnotations();
             } else {
@@ -648,6 +681,7 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
             annotationLabel.value = annotation.label || '';
             annotationColor.value = annotation.style.color || annotationColor.value;
             annotationOpacity.value = annotation.style.opacity ?? annotationOpacity.value;
+            annotationAuthor.value = annotation.author_id || annotationDefaultAuthor || 'viewer';
         }
 
         async function applyControlsToSelected() {
@@ -701,7 +735,7 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
             annotationCtx.beginPath();
             if (geometry.kind === 'point') {
                 const p = imageToCanvas(geometry.point);
-                annotationCtx.arc(p.x, p.y, selected ? 7 : 5, 0, Math.PI * 2);
+                annotationCtx.arc(p.x, p.y, pointCanvasRadius(style, geometry.point, selected), 0, Math.PI * 2);
                 annotationCtx.fill();
                 annotationCtx.stroke();
             } else if (geometry.kind === 'rectangle') {
@@ -728,7 +762,19 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
             annotationCtx.restore();
         }
 
+        function pointCanvasRadius(style, imagePoint, selected) {
+            const imageRadius = style.point_radius;
+            if (!imageRadius) return selected ? 7 : 5;
+            const center = imageToCanvas(imagePoint);
+            const edge = imageToCanvas({ x: imagePoint.x + imageRadius, y: imagePoint.y });
+            return Math.max(selected ? 7 : 5, Math.abs(edge.x - center.x));
+        }
+
         function drawSelectionBox(annotation) {
+            if (annotation.annotation_type === 'point') {
+                drawPointSelection(annotation);
+                return;
+            }
             const box = annotation.bbox;
             const topLeft = imageToCanvas({ x: box.x, y: box.y });
             const bottomRight = imageToCanvas({ x: box.x + box.width, y: box.y + box.height });
@@ -749,6 +795,25 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
                 annotationCtx.fillRect(handle.canvas.x - 5, handle.canvas.y - 5, 10, 10);
                 annotationCtx.strokeRect(handle.canvas.x - 5, handle.canvas.y - 5, 10, 10);
             }
+            annotationCtx.restore();
+        }
+
+        function drawPointSelection(annotation) {
+            const point = annotation.geometry.point;
+            const center = imageToCanvas(point);
+            const radius = pointCanvasRadius(annotation.style, point, true);
+            annotationCtx.save();
+            annotationCtx.strokeStyle = '#ffffff';
+            annotationCtx.lineWidth = 1;
+            annotationCtx.setLineDash([4, 4]);
+            annotationCtx.strokeRect(center.x - radius, center.y - radius, radius * 2, radius * 2);
+            annotationCtx.setLineDash([]);
+            const handle = { x: center.x + radius, y: center.y - radius };
+            annotationCtx.fillStyle = '#ffffff';
+            annotationCtx.strokeStyle = annotation.style.color || '#ff3366';
+            annotationCtx.lineWidth = 2;
+            annotationCtx.fillRect(handle.x - 5, handle.y - 5, 10, 10);
+            annotationCtx.strokeRect(handle.x - 5, handle.y - 5, 10, 10);
             annotationCtx.restore();
         }
 
@@ -818,6 +883,16 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
         }
 
         function resizeHandlePoints(annotation) {
+            if (annotation.annotation_type === 'point') {
+                const point = annotation.geometry.point;
+                const center = imageToCanvas(point);
+                const radius = pointCanvasRadius(annotation.style, point, true);
+                return [{
+                    name: 'point-radius',
+                    image: point,
+                    canvas: { x: center.x + radius, y: center.y - radius }
+                }];
+            }
             const b = annotation.bbox;
             return [
                 { name: 'nw', image: { x: b.x, y: b.y } },
@@ -828,7 +903,7 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
         }
 
         function findResizeHandle(annotation, event) {
-            if (!annotation || annotation.annotation_type === 'point') return null;
+            if (!annotation) return null;
             const rect = annotationCanvas.getBoundingClientRect();
             const canvasPoint = { x: event.clientX - rect.left, y: event.clientY - rect.top };
             return resizeHandlePoints(annotation).find(handle =>
@@ -848,7 +923,10 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
 
         function recomputeBbox(annotation) {
             const g = annotation.geometry;
-            if (g.kind === 'point') annotation.bbox = { x: g.point.x, y: g.point.y, width: 0, height: 0 };
+            if (g.kind === 'point') {
+                const radius = annotation.style.point_radius || 0;
+                annotation.bbox = { x: g.point.x - radius, y: g.point.y - radius, width: radius * 2, height: radius * 2 };
+            }
             if (g.kind === 'rectangle') annotation.bbox = { x: g.x, y: g.y, width: g.width, height: g.height };
             if (g.kind === 'circle') annotation.bbox = { x: g.center.x - g.radius, y: g.center.y - g.radius, width: g.radius * 2, height: g.radius * 2 };
             if (g.kind === 'ellipse') annotation.bbox = { x: g.center.x - g.radius_x, y: g.center.y - g.radius_y, width: g.radius_x * 2, height: g.radius_y * 2 };
@@ -918,6 +996,14 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
             return geometry;
         }
 
+        function resizePointAnnotation(annotation, point) {
+            const center = annotation.geometry.point;
+            const dx = point.x - center.x;
+            const dy = point.y - center.y;
+            annotation.style.point_radius = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+            recomputeBbox(annotation);
+        }
+
         document.querySelectorAll('.annotation-panel .tool').forEach(button => {
             button.addEventListener('click', () => {
                 document.querySelectorAll('.annotation-panel .tool').forEach(b => b.classList.remove('active'));
@@ -927,6 +1013,8 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
                 document.getElementById('annotation-edit').classList.remove('active');
                 draft = null;
                 selectedAnnotation = null;
+                annotationLabel.value = '';
+                annotationAuthor.value = annotationDefaultAuthor || 'viewer';
                 setStatus('');
                 renderAnnotations();
             });
@@ -937,6 +1025,8 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
             event.currentTarget.classList.toggle('active', editMode);
             draft = null;
             selectedAnnotation = null;
+            annotationLabel.value = '';
+            annotationAuthor.value = annotationDefaultAuthor || 'viewer';
             setStatus(editMode ? 'Move mode' : '');
             renderAnnotations();
         });
@@ -1005,9 +1095,13 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
                 annotationTooltip.style.display = 'none';
             }
             if (editMode && selectedAnnotation && dragStart && editOperation === 'resize' && resizeStart) {
-                const nextBox = normalizeBoxFromHandle(resizeStart.bbox, resizeStart.handle, point);
-                selectedAnnotation.geometry = resizeGeometry(resizeStart.geometry, resizeStart.bbox, nextBox);
-                recomputeBbox(selectedAnnotation);
+                if (selectedAnnotation.annotation_type === 'point') {
+                    resizePointAnnotation(selectedAnnotation, point);
+                } else {
+                    const nextBox = normalizeBoxFromHandle(resizeStart.bbox, resizeStart.handle, point);
+                    selectedAnnotation.geometry = resizeGeometry(resizeStart.geometry, resizeStart.bbox, nextBox);
+                    recomputeBbox(selectedAnnotation);
+                }
                 renderAnnotations();
                 return;
             }
@@ -1077,6 +1171,7 @@ fn annotation_script(base_url: &str, encoded_slide_id: &str, auth_query: &str) -
         )
         .replace("__SLIDE_ID__", &js_string_escape(encoded_slide_id))
         .replace("__AUTH_QUERY__", &js_string_escape(auth_query))
+        .replace("__AUTHOR_ID__", &js_string_escape(author_id))
 }
 
 fn js_string_escape(input: &str) -> String {
@@ -1138,7 +1233,8 @@ mod tests {
     #[test]
     fn test_generate_viewer_html_contains_slide_info() {
         let metadata = test_metadata();
-        let html = generate_viewer_html("test.svs", &metadata, "http://localhost:3000", "");
+        let html =
+            generate_viewer_html("test.svs", &metadata, "http://localhost:3000", "", "viewer");
 
         assert!(html.contains("test.svs"));
         assert!(html.contains("50000"));
@@ -1151,7 +1247,8 @@ mod tests {
     #[test]
     fn test_generate_viewer_html_contains_openseadragon() {
         let metadata = test_metadata();
-        let html = generate_viewer_html("test.svs", &metadata, "http://localhost:3000", "");
+        let html =
+            generate_viewer_html("test.svs", &metadata, "http://localhost:3000", "", "viewer");
 
         assert!(html.contains("openseadragon"));
         assert!(html.contains("OpenSeadragon"));
@@ -1160,7 +1257,8 @@ mod tests {
     #[test]
     fn test_generate_viewer_html_contains_tile_url() {
         let metadata = test_metadata();
-        let html = generate_viewer_html("test.svs", &metadata, "http://localhost:3000", "");
+        let html =
+            generate_viewer_html("test.svs", &metadata, "http://localhost:3000", "", "viewer");
 
         assert!(html.contains("/tiles/test.svs/"));
         assert!(html.contains(".jpg"));
@@ -1174,6 +1272,7 @@ mod tests {
             &metadata,
             "http://localhost:3000",
             "?exp=123&sig=abc",
+            "viewer",
         );
 
         assert!(html.contains("?exp=123&sig=abc"));
@@ -1187,6 +1286,7 @@ mod tests {
             &metadata,
             "http://localhost:3000",
             "",
+            "viewer",
         );
 
         // Should URL-encode the slide_id in tile URLs
@@ -1196,7 +1296,8 @@ mod tests {
     #[test]
     fn test_generate_viewer_html_contains_level_dimensions() {
         let metadata = test_metadata();
-        let html = generate_viewer_html("test.svs", &metadata, "http://localhost:3000", "");
+        let html =
+            generate_viewer_html("test.svs", &metadata, "http://localhost:3000", "", "viewer");
 
         // Should contain level dimension objects
         assert!(html.contains("width: 50000, height: 40000"));
@@ -1233,6 +1334,7 @@ mod tests {
             &metadata,
             "http://localhost:3000",
             "",
+            "viewer",
         );
 
         // The literal script tag should NOT appear unescaped
@@ -1246,7 +1348,8 @@ mod tests {
         let mut metadata = test_metadata();
         metadata.format = "<img onerror=alert(1)>".to_string();
 
-        let html = generate_viewer_html("test.svs", &metadata, "http://localhost:3000", "");
+        let html =
+            generate_viewer_html("test.svs", &metadata, "http://localhost:3000", "", "viewer");
 
         // The literal img tag should NOT appear unescaped
         assert!(!html.contains("<img onerror=alert(1)>"));
